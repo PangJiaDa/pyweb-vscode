@@ -42,6 +42,10 @@
       {
         "command": "pyweb.addProse",
         "title": "PyWeb: Add/Edit Prose"
+      },
+      {
+        "command": "pyweb.resizeFragment",
+        "title": "PyWeb: Resize Fragment to Selection"
       }
     ],
     "viewsContainers": {
@@ -84,6 +88,10 @@
         },
         {
           "command": "pyweb.showHierarchicalView",
+          "when": "view == pywebFragments"
+        },
+        {
+          "command": "pyweb.resizeFragment",
           "when": "view == pywebFragments"
         }
       ],

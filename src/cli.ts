@@ -114,6 +114,15 @@ export async function renameFragment(
   return runCli(["rename", file, fragmentId, newName]);
 }
 
+export async function resizeFragment(
+  file: string,
+  fragmentId: string,
+  startLine: number,
+  endLine: number
+): Promise<string> {
+  return runCli(["resize", file, fragmentId, startLine.toString(), endLine.toString()]);
+}
+
 export async function listFragments(file: string): Promise<string> {
   return runCli(["ls", file]);
 }

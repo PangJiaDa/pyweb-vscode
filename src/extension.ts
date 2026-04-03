@@ -15,6 +15,12 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(treeView);
 
+  // Folding provider — folds fragments in the editor
+  const foldingProvider = new FragmentFoldingProvider();
+  context.subscriptions.push(
+    vscode.languages.registerFoldingRangeProvider({ scheme: "file" }, foldingProvider)
+  );
+
   // Commands
   context.subscriptions.push(
     vscode.commands.registerCommand("pyweb.init", cmdInit),
@@ -27,7 +33,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("pyweb.showHierarchicalView", cmdShowHierarchicalView),
     vscode.commands.registerCommand("pyweb.addProse", cmdAddProse),
-    vscode.commands.registerCommand("pyweb.goToFragment", cmdGoToFragment)
+    vscode.commands.registerCommand("pyweb.goToFragment", cmdGoToFragment),
+    vscode.commands.registerCommand("pyweb.resizeFragment", cmdResizeFragment)
   );
 
   // Refresh on active editor change
@@ -70,6 +77,37 @@ export function deactivate(): void {
   disposeDecorations();
 }
 
+// --- Folding provider ---
+
+class FragmentFoldingProvider implements vscode.FoldingRangeProvider {
+  async provideFoldingRanges(
+    document: vscode.TextDocument
+  ): Promise<vscode.FoldingRange[]> {
+    const relPath = getRelativePath(document.uri);
+    if (!relPath) {
+      return [];
+    }
+
+    const ff = await cli.loadFileFragments(relPath);
+    if (!ff || ff.fragments.length === 0) {
+      return [];
+    }
+
+    const ranges: vscode.FoldingRange[] = [];
+    for (const frag of ff.fragments) {
+      const r = frag.range;
+      if (r.start_line < 0) {
+        continue; // orphaned
+      }
+      const endLine = Math.max(r.start_line, r.end_line - 1);
+      if (r.start_line < endLine) {
+        ranges.push(new vscode.FoldingRange(r.start_line, endLine, vscode.FoldingRangeKind.Region));
+      }
+    }
+    return ranges;
+  }
+}
+
 // --- Command handlers ---
 
 async function cmdInit(): Promise<void> {
@@ -108,25 +146,35 @@ async function cmdAddFragment(): Promise<void> {
     return;
   }
 
-  // Ask for optional parent
+  const startLine = selection.start.line;
+  const endLine = selection.end.line + (selection.end.character > 0 ? 1 : 0);
+
+  // Auto-infer parent: find the deepest fragment that fully contains the selection
   const ff = await cli.loadFileFragments(relPath);
   let parentId: string | undefined;
   if (ff && ff.fragments.length > 0) {
-    const items = [
-      { label: "(none — root fragment)", id: undefined },
-      ...ff.fragments.map((f) => ({ label: f.name, id: f.id })),
-    ];
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: "Parent fragment (optional)",
-    });
-    if (picked === undefined) {
-      return; // cancelled
-    }
-    parentId = picked.id;
-  }
+    let bestParent: cli.FragmentInfo | null = null;
+    let bestSize = Infinity;
 
-  const startLine = selection.start.line;
-  const endLine = selection.end.line + (selection.end.character > 0 ? 1 : 0);
+    for (const f of ff.fragments) {
+      const r = f.range;
+      if (r.start_line < 0) {
+        continue; // orphaned
+      }
+      // Does this fragment fully contain the selection?
+      if (r.start_line <= startLine && endLine <= r.end_line) {
+        const size = r.end_line - r.start_line;
+        if (size < bestSize) {
+          bestSize = size;
+          bestParent = f;
+        }
+      }
+    }
+
+    if (bestParent) {
+      parentId = bestParent.id;
+    }
+  }
 
   try {
     const output = await cli.addFragment(relPath, name, startLine, endLine, parentId);
@@ -139,9 +187,13 @@ async function cmdAddFragment(): Promise<void> {
 }
 
 async function cmdRemoveFragment(item?: FragmentTreeItem): Promise<void> {
+  // If invoked from command palette (no item), pick from list
   if (!item) {
-    vscode.window.showErrorMessage("Use the tree view context menu to remove a fragment");
-    return;
+    const picked = await pickFragment();
+    if (!picked) {
+      return;
+    }
+    item = picked;
   }
 
   const confirm = await vscode.window.showWarningMessage(
@@ -164,8 +216,11 @@ async function cmdRemoveFragment(item?: FragmentTreeItem): Promise<void> {
 
 async function cmdRenameFragment(item?: FragmentTreeItem): Promise<void> {
   if (!item) {
-    vscode.window.showErrorMessage("Use the tree view context menu to rename a fragment");
-    return;
+    const picked = await pickFragment();
+    if (!picked) {
+      return;
+    }
+    item = picked;
   }
 
   const newName = await vscode.window.showInputBox({
@@ -185,6 +240,43 @@ async function cmdRenameFragment(item?: FragmentTreeItem): Promise<void> {
   }
 }
 
+async function cmdResizeFragment(item?: FragmentTreeItem): Promise<void> {
+  // If invoked from tree context menu, use current editor selection as new range
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage("No active editor");
+    return;
+  }
+
+  if (!item) {
+    const picked = await pickFragment();
+    if (!picked) {
+      return;
+    }
+    item = picked;
+  }
+
+  const selection = editor.selection;
+  if (selection.isEmpty) {
+    vscode.window.showErrorMessage("Select the new range for this fragment first");
+    return;
+  }
+
+  const startLine = selection.start.line;
+  const endLine = selection.end.line + (selection.end.character > 0 ? 1 : 0);
+
+  try {
+    await cli.resizeFragment(item.fragment.file, item.fragment.id, startLine, endLine);
+    vscode.window.showInformationMessage(
+      `Resized "${item.fragment.name}" → [${startLine} - ${endLine}]`
+    );
+    treeProvider.refresh();
+    updateDecorations(editor);
+  } catch (e: any) {
+    vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
+  }
+}
+
 async function cmdShowHierarchicalView(item?: FragmentTreeItem): Promise<void> {
   const fragmentId = item?.fragment.id;
   const fileRelPath = item?.fragment.file;
@@ -193,7 +285,11 @@ async function cmdShowHierarchicalView(item?: FragmentTreeItem): Promise<void> {
 
 async function cmdAddProse(item?: FragmentTreeItem): Promise<void> {
   if (!item) {
-    return;
+    const picked = await pickFragment();
+    if (!picked) {
+      return;
+    }
+    item = picked;
   }
 
   const prose = await vscode.window.showInputBox({
@@ -249,4 +345,43 @@ function refreshActiveEditorDecorations(): void {
   if (editor) {
     updateDecorations(editor);
   }
+}
+
+/**
+ * Show a quick pick of all fragments in the active file.
+ * Used when a command is invoked from the command palette (no tree item).
+ */
+async function pickFragment(): Promise<FragmentTreeItem | null> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage("No active editor");
+    return null;
+  }
+
+  const relPath = getRelativePath(editor.document.uri);
+  if (!relPath) {
+    return null;
+  }
+
+  const ff = await cli.loadFileFragments(relPath);
+  if (!ff || ff.fragments.length === 0) {
+    vscode.window.showInformationMessage("No fragments in this file");
+    return null;
+  }
+
+  const items = ff.fragments.map((f) => ({
+    label: f.name,
+    description: `[${f.range.start_line} - ${f.range.end_line}]`,
+    fragment: f,
+  }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select a fragment",
+  });
+
+  if (!picked) {
+    return null;
+  }
+
+  return new FragmentTreeItem(picked.fragment, picked.fragment.children.length > 0);
 }
