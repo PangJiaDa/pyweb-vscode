@@ -40,6 +40,10 @@
       {
         "command": "pyweb.resizeFragment",
         "title": "PyWeb: Resize Fragment to Selection"
+      },
+      {
+        "command": "pyweb.jumpToMatchingMarker",
+        "title": "PyWeb: Jump to Matching Marker"
       }
     ],
     "viewsContainers": {

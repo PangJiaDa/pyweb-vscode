@@ -32,7 +32,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("pyweb.showHierarchicalView", cmdShowHierarchicalView),
     vscode.commands.registerCommand("pyweb.addProse", cmdAddProse),
     vscode.commands.registerCommand("pyweb.goToFragment", cmdGoToFragment),
-    vscode.commands.registerCommand("pyweb.resizeFragment", cmdResizeFragment)
+    vscode.commands.registerCommand("pyweb.resizeFragment", cmdResizeFragment),
+    vscode.commands.registerCommand("pyweb.jumpToMatchingMarker", cmdJumpToMatchingMarker)
   );
 
   // Refresh tree + decorations on editor change
@@ -254,6 +255,65 @@ function cmdGoToFragment(fragment: cli.ParsedFragment, filePath: string): void {
   const uri = vscode.Uri.file(path.join(folders[0].uri.fsPath, filePath));
   const range = new vscode.Range(fragment.start_line, 0, fragment.start_line, 0);
   vscode.window.showTextDocument(uri, { selection: range, preserveFocus: false });
+}
+
+async function cmdJumpToMatchingMarker(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+
+  const relPath = getRelativePath(editor.document.uri);
+  if (!relPath) {
+    return;
+  }
+
+  let result;
+  try {
+    result = await cli.parseFile(relPath);
+  } catch {
+    return;
+  }
+
+  const cursorLine = editor.selection.active.line;
+
+  // Find the fragment whose start or end marker the cursor is on, or the deepest containing fragment
+  for (const f of result.fragments) {
+    // On start marker → jump to end
+    if (cursorLine === f.start_line) {
+      const endMarkerLine = f.end_line - 1; // end_line is exclusive
+      goToLine(editor, endMarkerLine);
+      return;
+    }
+    // On end marker → jump to start
+    if (cursorLine === f.end_line - 1) {
+      goToLine(editor, f.start_line);
+      return;
+    }
+  }
+
+  // In the middle of a fragment → jump to end of deepest containing fragment
+  let best: cli.ParsedFragment | null = null;
+  let bestSize = Infinity;
+  for (const f of result.fragments) {
+    if (f.start_line < cursorLine && cursorLine < f.end_line - 1) {
+      const size = f.end_line - f.start_line;
+      if (size < bestSize) {
+        bestSize = size;
+        best = f;
+      }
+    }
+  }
+
+  if (best) {
+    goToLine(editor, best.end_line - 1);
+  }
+}
+
+function goToLine(editor: vscode.TextEditor, line: number): void {
+  const pos = new vscode.Position(line, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 }
 
 // --- Helpers ---
