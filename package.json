@@ -1,0 +1,125 @@
+{
+  "name": "pyweb",
+  "displayName": "PyWeb — Hierarchical Code Fragments",
+  "description": "Define named, hierarchical code regions over any source file. Zero-buy-in overlay with bidirectional sync.",
+  "version": "0.0.1",
+  "publisher": "pyweb",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:.pyweb"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pyweb.init",
+        "title": "PyWeb: Initialize Project"
+      },
+      {
+        "command": "pyweb.addFragment",
+        "title": "PyWeb: Create Fragment from Selection"
+      },
+      {
+        "command": "pyweb.removeFragment",
+        "title": "PyWeb: Remove Fragment"
+      },
+      {
+        "command": "pyweb.renameFragment",
+        "title": "PyWeb: Rename Fragment"
+      },
+      {
+        "command": "pyweb.refreshTree",
+        "title": "PyWeb: Refresh Fragment Tree",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "pyweb.showHierarchicalView",
+        "title": "PyWeb: Show Hierarchical View"
+      },
+      {
+        "command": "pyweb.addProse",
+        "title": "PyWeb: Add/Edit Prose"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pyweb",
+          "title": "PyWeb Fragments",
+          "icon": "$(symbol-structure)"
+        }
+      ]
+    },
+    "views": {
+      "pyweb": [
+        {
+          "id": "pywebFragments",
+          "name": "Fragments"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "pyweb.refreshTree",
+          "when": "view == pywebFragments",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "pyweb.renameFragment",
+          "when": "view == pywebFragments"
+        },
+        {
+          "command": "pyweb.removeFragment",
+          "when": "view == pywebFragments"
+        },
+        {
+          "command": "pyweb.addProse",
+          "when": "view == pywebFragments"
+        },
+        {
+          "command": "pyweb.showHierarchicalView",
+          "when": "view == pywebFragments"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "pyweb.addFragment",
+          "when": "editorHasSelection",
+          "group": "pyweb"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PyWeb",
+      "properties": {
+        "pyweb.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to Python interpreter."
+        },
+        "pyweb.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to pyweb CLI module. If empty, uses 'python3 -m pyweb.cli'."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
