@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { loadFileFragments, FragmentInfo, FileFragmentsInfo } from "./cli";
+import { parseFile, ParsedFragment, ParseResult } from "./cli";
 
 export class FragmentTreeItem extends vscode.TreeItem {
   constructor(
-    public readonly fragment: FragmentInfo,
+    public readonly fragment: ParsedFragment,
+    public readonly filePath: string,
     public readonly hasChildren: boolean
   ) {
     super(
@@ -14,23 +15,17 @@ export class FragmentTreeItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None
     );
 
-    const r = fragment.range;
-    this.description = `[${r.start_line}:${r.start_col} - ${r.end_line}:${r.end_col}]`;
+    this.description = `[${fragment.start_line} - ${fragment.end_line}]`;
     this.tooltip = fragment.prose || fragment.name;
     this.contextValue = "fragment";
 
-    if (r.start_line >= 0) {
-      this.command = {
-        command: "pyweb.goToFragment",
-        title: "Go to Fragment",
-        arguments: [fragment],
-      };
-    }
+    this.command = {
+      command: "pyweb.goToFragment",
+      title: "Go to Fragment",
+      arguments: [fragment, filePath],
+    };
 
-    if (r.start_line === -1) {
-      this.description += " [orphaned]";
-      this.iconPath = new vscode.ThemeIcon("warning");
-    } else if (fragment.prose) {
+    if (fragment.prose) {
       this.iconPath = new vscode.ThemeIcon("bookmark");
     } else {
       this.iconPath = new vscode.ThemeIcon("symbol-structure");
@@ -42,10 +37,12 @@ export class FragmentTreeProvider implements vscode.TreeDataProvider<FragmentTre
   private _onDidChangeTreeData = new vscode.EventEmitter<FragmentTreeItem | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private fileFragments: Map<string, FileFragmentsInfo> = new Map();
+  private cachedResult: ParseResult | null = null;
+  private cachedFile: string | null = null;
 
   refresh(): void {
-    this.fileFragments.clear();
+    this.cachedResult = null;
+    this.cachedFile = null;
     this._onDidChangeTreeData.fire();
   }
 
@@ -57,7 +54,7 @@ export class FragmentTreeProvider implements vscode.TreeDataProvider<FragmentTre
     if (!element) {
       return this.getRootItems();
     }
-    return this.getChildItems(element.fragment);
+    return this.getChildItems(element);
   }
 
   private async getRootItems(): Promise<FragmentTreeItem[]> {
@@ -71,50 +68,46 @@ export class FragmentTreeProvider implements vscode.TreeDataProvider<FragmentTre
       return [];
     }
 
-    const ff = await this.loadFragments(filePath);
-    if (!ff || ff.fragments.length === 0) {
+    const result = await this.loadParsed(filePath);
+    if (!result || result.fragments.length === 0) {
       return [];
     }
 
-    // Find roots: fragments not in any other fragment's children
-    const childIds = new Set<string>();
-    for (const f of ff.fragments) {
-      for (const cid of f.children) {
-        childIds.add(cid);
-      }
-    }
-
-    const roots = ff.fragments
-      .filter((f) => !childIds.has(f.id))
-      .sort((a, b) => a.range.start_line - b.range.start_line);
+    // Roots = fragments with no parent
+    const roots = result.fragments
+      .filter((f) => f.parent_id === null)
+      .sort((a, b) => a.start_line - b.start_line);
 
     return roots.map(
-      (f) => new FragmentTreeItem(f, f.children.length > 0)
+      (f) => new FragmentTreeItem(f, filePath, f.children.length > 0)
     );
   }
 
-  private async getChildItems(parent: FragmentInfo): Promise<FragmentTreeItem[]> {
-    const ff = await this.loadFragments(parent.file);
-    if (!ff) {
+  private async getChildItems(parent: FragmentTreeItem): Promise<FragmentTreeItem[]> {
+    const result = await this.loadParsed(parent.filePath);
+    if (!result) {
       return [];
     }
 
-    const byId = new Map(ff.fragments.map((f) => [f.id, f]));
-    return parent.children
+    const byId = new Map(result.fragments.map((f) => [f.id, f]));
+    return parent.fragment.children
       .map((cid) => byId.get(cid))
-      .filter((f): f is FragmentInfo => f !== undefined)
-      .map((f) => new FragmentTreeItem(f, f.children.length > 0));
+      .filter((f): f is ParsedFragment => f !== undefined)
+      .map((f) => new FragmentTreeItem(f, parent.filePath, f.children.length > 0));
   }
 
-  private async loadFragments(filePath: string): Promise<FileFragmentsInfo | null> {
-    if (this.fileFragments.has(filePath)) {
-      return this.fileFragments.get(filePath)!;
+  private async loadParsed(filePath: string): Promise<ParseResult | null> {
+    if (this.cachedFile === filePath && this.cachedResult) {
+      return this.cachedResult;
     }
-    const ff = await loadFileFragments(filePath);
-    if (ff) {
-      this.fileFragments.set(filePath, ff);
+    try {
+      const result = await parseFile(filePath);
+      this.cachedResult = result;
+      this.cachedFile = filePath;
+      return result;
+    } catch {
+      return null;
     }
-    return ff;
   }
 
   private getRelativePath(uri: vscode.Uri): string | null {
@@ -128,16 +121,5 @@ export class FragmentTreeProvider implements vscode.TreeDataProvider<FragmentTre
       return null;
     }
     return path.relative(root, absPath);
-  }
-
-  /**
-   * Get the fragment info for a given fragment ID in the current file.
-   */
-  async getFragmentById(fileRelPath: string, fragmentId: string): Promise<FragmentInfo | null> {
-    const ff = await this.loadFragments(fileRelPath);
-    if (!ff) {
-      return null;
-    }
-    return ff.fragments.find((f) => f.id === fragmentId) || null;
   }
 }

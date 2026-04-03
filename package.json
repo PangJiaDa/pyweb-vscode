@@ -8,16 +8,10 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": [
-    "workspaceContains:.pyweb"
-  ],
+  "activationEvents": ["*"],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "pyweb.init",
-        "title": "PyWeb: Initialize Project"
-      },
       {
         "command": "pyweb.addFragment",
         "title": "PyWeb: Create Fragment from Selection"

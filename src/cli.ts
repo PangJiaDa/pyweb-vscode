@@ -2,24 +2,22 @@ import { execFile } from "child_process";
 import * as vscode from "vscode";
 import * as path from "path";
 
-export interface FragmentInfo {
+export interface ParsedFragment {
   id: string;
   name: string;
-  file: string;
-  range: {
-    start_line: number;
-    start_col: number;
-    end_line: number;
-    end_col: number;
-  };
+  start_line: number;
+  end_line: number;
+  content_start_line: number;
+  content_end_line: number;
   children: string[];
+  parent_id: string | null;
   prose: string | null;
 }
 
-export interface FileFragmentsInfo {
+export interface ParseResult {
   file: string;
-  content_hash: string;
-  fragments: FragmentInfo[];
+  fragments: ParsedFragment[];
+  warnings: { line: number; message: string }[];
 }
 
 function getProjectRoot(): string {
@@ -44,9 +42,9 @@ function getCliArgs(): string[] {
   return ["-m", "pyweb"];
 }
 
-function runCli(args: string[], cwd?: string): Promise<string> {
+function runCli(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const projectRoot = cwd || getProjectRoot();
+    const projectRoot = getProjectRoot();
     const python = getPythonPath();
     const cliArgs = getCliArgs();
     const fullArgs = [...cliArgs, "-p", projectRoot, ...args];
@@ -65,39 +63,16 @@ function runCli(args: string[], cwd?: string): Promise<string> {
   });
 }
 
-export async function init(): Promise<string> {
-  return runCli(["init"]);
-}
-
 export async function addFragment(
   file: string,
   name: string,
   startLine: number,
   endLine: number,
-  parentId?: string,
   prose?: string
 ): Promise<string> {
   const args = ["add", file, name, startLine.toString(), endLine.toString()];
-  if (parentId) {
-    args.push("--parent", parentId);
-  }
   if (prose) {
     args.push("--prose", prose);
-  }
-  return runCli(args);
-}
-
-export async function addInlineFragment(
-  file: string,
-  name: string,
-  line: number,
-  startCol: number,
-  endCol: number,
-  parentId?: string
-): Promise<string> {
-  const args = ["add-inline", file, name, line.toString(), startCol.toString(), endCol.toString()];
-  if (parentId) {
-    args.push("--parent", parentId);
   }
   return runCli(args);
 }
@@ -106,12 +81,16 @@ export async function removeFragment(file: string, fragmentId: string): Promise<
   return runCli(["rm", file, fragmentId]);
 }
 
-export async function renameFragment(
-  file: string,
-  fragmentId: string,
-  newName: string
-): Promise<string> {
+export async function renameFragment(file: string, fragmentId: string, newName: string): Promise<string> {
   return runCli(["rename", file, fragmentId, newName]);
+}
+
+export async function setProse(file: string, fragmentId: string, text: string | null): Promise<string> {
+  const args = ["prose", file, fragmentId];
+  if (text) {
+    args.push(text);
+  }
+  return runCli(args);
 }
 
 export async function resizeFragment(
@@ -127,18 +106,7 @@ export async function listFragments(file: string): Promise<string> {
   return runCli(["ls", file]);
 }
 
-export async function checkFragments(file: string): Promise<string> {
-  return runCli(["check", file]);
-}
-
-export async function anchorFile(file: string): Promise<string> {
-  return runCli(["anchor", file]);
-}
-
-export async function getHierarchicalView(
-  file: string,
-  fragmentId?: string
-): Promise<string> {
+export async function getHierarchicalView(file: string, fragmentId?: string): Promise<string> {
   const args = ["view", file];
   if (fragmentId) {
     args.push("--fragment", fragmentId);
@@ -146,46 +114,15 @@ export async function getHierarchicalView(
   return runCli(args);
 }
 
-/**
- * Read the fragment JSON file directly for richer data than CLI output provides.
- */
-export async function loadFileFragments(file: string): Promise<FileFragmentsInfo | null> {
-  const projectRoot = getProjectRoot();
-  const fragPath = path.join(projectRoot, ".pyweb", "fragments", file + ".json");
-
-  try {
-    const uri = vscode.Uri.file(fragPath);
-    const data = await vscode.workspace.fs.readFile(uri);
-    const text = Buffer.from(data).toString("utf-8");
-    return JSON.parse(text) as FileFragmentsInfo;
-  } catch {
-    return null;
-  }
+export async function checkFile(file: string): Promise<string> {
+  return runCli(["check", file]);
 }
 
 /**
- * Set prose on a fragment by directly editing the JSON sidecar.
- * (The CLI doesn't have a set-prose command, so we do it directly.)
+ * Parse markers from a file, returning structured JSON data.
+ * This is the primary data source for the extension.
  */
-export async function setProse(
-  file: string,
-  fragmentId: string,
-  prose: string | null
-): Promise<void> {
-  const projectRoot = getProjectRoot();
-  const fragPath = path.join(projectRoot, ".pyweb", "fragments", file + ".json");
-  const uri = vscode.Uri.file(fragPath);
-
-  const data = await vscode.workspace.fs.readFile(uri);
-  const text = Buffer.from(data).toString("utf-8");
-  const ff = JSON.parse(text) as FileFragmentsInfo;
-
-  const frag = ff.fragments.find((f) => f.id === fragmentId);
-  if (!frag) {
-    throw new Error(`Fragment ${fragmentId} not found`);
-  }
-  frag.prose = prose;
-
-  const newText = JSON.stringify(ff, null, 2);
-  await vscode.workspace.fs.writeFile(uri, Buffer.from(newText, "utf-8"));
+export async function parseFile(file: string): Promise<ParseResult> {
+  const output = await runCli(["parse", file]);
+  return JSON.parse(output) as ParseResult;
 }
