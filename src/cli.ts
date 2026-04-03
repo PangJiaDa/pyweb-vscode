@@ -41,7 +41,7 @@ function getCliArgs(): string[] {
   if (cliPath) {
     return [cliPath];
   }
-  return ["-m", "pyweb.cli"];
+  return ["-m", "pyweb"];
 }
 
 function runCli(args: string[], cwd?: string): Promise<string> {
@@ -51,7 +51,11 @@ function runCli(args: string[], cwd?: string): Promise<string> {
     const cliArgs = getCliArgs();
     const fullArgs = [...cliArgs, "-p", projectRoot, ...args];
 
+    console.log(`[pyweb] ${python} ${fullArgs.join(" ")}`);
     execFile(python, fullArgs, { cwd: projectRoot, timeout: 30000 }, (error, stdout, stderr) => {
+      if (stderr) {
+        console.log(`[pyweb] stderr: ${stderr}`);
+      }
       if (error) {
         reject(new Error(stderr || error.message));
       } else {
