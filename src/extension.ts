@@ -86,7 +86,7 @@ class FragmentFoldingProvider implements vscode.FoldingRangeProvider {
       .filter((f) => f.end_line - f.start_line > 1)
       .map((f) => new vscode.FoldingRange(
         f.start_line,
-        Math.max(f.start_line, f.end_line - 2), // fold up to the line before end marker
+        Math.max(f.start_line, f.end_line - 1), // fold includes end marker
         vscode.FoldingRangeKind.Region
       ));
   }
@@ -134,8 +134,9 @@ async function cmdAddFragment(): Promise<void> {
 }
 
 async function cmdRemoveFragment(item?: FragmentTreeItem): Promise<void> {
-  const target = item || (await pickFragment());
+  const target = item || (await fragmentAtCursor());
   if (!target) {
+    vscode.window.showInformationMessage("Cursor is not inside a fragment");
     return;
   }
 
@@ -158,8 +159,10 @@ async function cmdRemoveFragment(item?: FragmentTreeItem): Promise<void> {
 }
 
 async function cmdRenameFragment(item?: FragmentTreeItem): Promise<void> {
-  const target = item || (await pickFragment());
+  // If from tree context menu, use that. Otherwise, find fragment at cursor.
+  const target = item || (await fragmentAtCursor());
   if (!target) {
+    vscode.window.showInformationMessage("Cursor is not inside a fragment");
     return;
   }
 
@@ -187,7 +190,7 @@ async function cmdResizeFragment(item?: FragmentTreeItem): Promise<void> {
     return;
   }
 
-  const target = item || (await pickFragment());
+  const target = item || (await fragmentAtCursor());
   if (!target) {
     return;
   }
@@ -220,7 +223,7 @@ async function cmdShowHierarchicalView(item?: FragmentTreeItem): Promise<void> {
 }
 
 async function cmdAddProse(item?: FragmentTreeItem): Promise<void> {
-  const target = item || (await pickFragment());
+  const target = item || (await fragmentAtCursor());
   if (!target) {
     return;
   }
@@ -315,4 +318,46 @@ async function pickFragment(): Promise<FragmentTreeItem | null> {
   }
 
   return new FragmentTreeItem(picked.fragment, relPath, picked.fragment.children.length > 0);
+}
+
+/**
+ * Find the deepest fragment containing the cursor position.
+ */
+async function fragmentAtCursor(): Promise<FragmentTreeItem | null> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return null;
+  }
+
+  const relPath = getRelativePath(editor.document.uri);
+  if (!relPath) {
+    return null;
+  }
+
+  let result;
+  try {
+    result = await cli.parseFile(relPath);
+  } catch {
+    return null;
+  }
+
+  const cursorLine = editor.selection.active.line;
+  let best: cli.ParsedFragment | null = null;
+  let bestSize = Infinity;
+
+  for (const f of result.fragments) {
+    if (f.start_line <= cursorLine && cursorLine < f.end_line) {
+      const size = f.end_line - f.start_line;
+      if (size < bestSize) {
+        bestSize = size;
+        best = f;
+      }
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  return new FragmentTreeItem(best, relPath, best.children.length > 0);
 }
