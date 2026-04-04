@@ -44,6 +44,14 @@
       {
         "command": "pyweb.jumpToMatchingMarker",
         "title": "PyWeb: Jump to Matching Marker"
+      },
+      {
+        "command": "pyweb.nextFragment",
+        "title": "PyWeb: Next Fragment"
+      },
+      {
+        "command": "pyweb.previousFragment",
+        "title": "PyWeb: Previous Fragment"
       }
     ],
     "viewsContainers": {

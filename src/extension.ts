@@ -33,7 +33,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("pyweb.addProse", cmdAddProse),
     vscode.commands.registerCommand("pyweb.goToFragment", cmdGoToFragment),
     vscode.commands.registerCommand("pyweb.resizeFragment", cmdResizeFragment),
-    vscode.commands.registerCommand("pyweb.jumpToMatchingMarker", cmdJumpToMatchingMarker)
+    vscode.commands.registerCommand("pyweb.jumpToMatchingMarker", cmdJumpToMatchingMarker),
+    vscode.commands.registerCommand("pyweb.nextFragment", () => cmdNavigateFragment("next")),
+    vscode.commands.registerCommand("pyweb.previousFragment", () => cmdNavigateFragment("prev"))
   );
 
   // Refresh tree + decorations on editor change
@@ -307,6 +309,49 @@ async function cmdJumpToMatchingMarker(): Promise<void> {
 
   if (best) {
     goToLine(editor, best.end_line - 1);
+  }
+}
+
+async function cmdNavigateFragment(direction: "next" | "prev"): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+
+  const relPath = getRelativePath(editor.document.uri);
+  if (!relPath) {
+    return;
+  }
+
+  let result;
+  try {
+    result = await cli.parseFile(relPath);
+  } catch {
+    return;
+  }
+
+  if (result.fragments.length === 0) {
+    return;
+  }
+
+  // Sort all fragment start lines
+  const startLines = result.fragments
+    .map((f) => f.start_line)
+    .sort((a, b) => a - b);
+
+  const cursorLine = editor.selection.active.line;
+
+  if (direction === "next") {
+    const next = startLines.find((l) => l > cursorLine);
+    if (next !== undefined) {
+      goToLine(editor, next);
+    }
+  } else {
+    // Find the last start_line before cursor
+    const prev = [...startLines].reverse().find((l) => l < cursorLine);
+    if (prev !== undefined) {
+      goToLine(editor, prev);
+    }
   }
 }
 
