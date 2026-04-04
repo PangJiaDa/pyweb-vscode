@@ -30,10 +30,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "pyweb.showHierarchicalView",
-        "title": "PyWeb: Show Hierarchical View"
-      },
-      {
         "command": "pyweb.addProse",
         "title": "PyWeb: Add/Edit Prose"
       },
@@ -90,10 +86,6 @@
         },
         {
           "command": "pyweb.addProse",
-          "when": "view == pywebFragments"
-        },
-        {
-          "command": "pyweb.showHierarchicalView",
           "when": "view == pywebFragments"
         },
         {

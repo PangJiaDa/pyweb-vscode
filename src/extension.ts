@@ -3,7 +3,6 @@ import * as path from "path";
 import * as cli from "./cli";
 import { FragmentTreeProvider, FragmentTreeItem } from "./treeView";
 import { updateDecorations, clearDecorations, disposeDecorations } from "./decorations";
-import { showHierarchicalView } from "./hierarchicalView";
 
 let treeProvider: FragmentTreeProvider;
 
@@ -29,7 +28,6 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.refresh();
       refreshActiveEditorDecorations();
     }),
-    vscode.commands.registerCommand("pyweb.showHierarchicalView", cmdShowHierarchicalView),
     vscode.commands.registerCommand("pyweb.addProse", cmdAddProse),
     vscode.commands.registerCommand("pyweb.goToFragment", cmdGoToFragment),
     vscode.commands.registerCommand("pyweb.resizeFragment", cmdResizeFragment),
@@ -129,8 +127,7 @@ async function cmdAddFragment(): Promise<void> {
   try {
     const output = await cli.addFragment(relPath, name, startLine, endLine);
     vscode.window.showInformationMessage(output.trim());
-    treeProvider.refresh();
-    updateDecorations(editor);
+    await reloadAndRefresh();
   } catch (e: any) {
     vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
   }
@@ -154,8 +151,7 @@ async function cmdRemoveFragment(item?: FragmentTreeItem): Promise<void> {
 
   try {
     await cli.removeFragment(target.filePath, target.fragment.id);
-    treeProvider.refresh();
-    refreshActiveEditorDecorations();
+    await reloadAndRefresh();
   } catch (e: any) {
     vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
   }
@@ -179,8 +175,7 @@ async function cmdRenameFragment(item?: FragmentTreeItem): Promise<void> {
 
   try {
     await cli.renameFragment(target.filePath, target.fragment.id, newName);
-    treeProvider.refresh();
-    refreshActiveEditorDecorations();
+    await reloadAndRefresh();
   } catch (e: any) {
     vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
   }
@@ -212,18 +207,12 @@ async function cmdResizeFragment(item?: FragmentTreeItem): Promise<void> {
     vscode.window.showInformationMessage(
       `Resized "${target.fragment.name}" → [${startLine} - ${endLine}]`
     );
-    treeProvider.refresh();
-    updateDecorations(editor);
+    await reloadAndRefresh();
   } catch (e: any) {
     vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
   }
 }
 
-async function cmdShowHierarchicalView(item?: FragmentTreeItem): Promise<void> {
-  const fragmentId = item?.fragment.id;
-  const fileRelPath = item?.filePath;
-  await showHierarchicalView(fileRelPath, fragmentId);
-}
 
 async function cmdAddProse(item?: FragmentTreeItem): Promise<void> {
   const target = item || (await fragmentAtCursor());
@@ -241,8 +230,7 @@ async function cmdAddProse(item?: FragmentTreeItem): Promise<void> {
 
   try {
     await cli.setProse(target.filePath, target.fragment.id, prose || null);
-    treeProvider.refresh();
-    refreshActiveEditorDecorations();
+    await reloadAndRefresh();
   } catch (e: any) {
     vscode.window.showErrorMessage(`PyWeb: ${e.message}`);
   }
@@ -374,6 +362,24 @@ function getRelativePath(uri: vscode.Uri): string | null {
     return null;
   }
   return path.relative(root, absPath);
+}
+
+/**
+ * After a CLI command modifies the file on disk, the editor buffer is stale.
+ * This reverts the document from disk, then refreshes tree + decorations.
+ */
+async function reloadAndRefresh(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (editor) {
+    // Revert editor to match what's on disk
+    await vscode.commands.executeCommand("workbench.action.files.revert");
+    // Small delay to let the editor update its buffer
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  treeProvider.refresh();
+  if (editor) {
+    updateDecorations(editor);
+  }
 }
 
 function refreshActiveEditorDecorations(): void {
